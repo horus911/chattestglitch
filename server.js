@@ -1,21 +1,27 @@
-const express = require("express");
-const http = require("http");
-const WebSocket = require("wss://relieved-believed-conchoraptor.glitch.me/");
+const WebSocket = require('ws://relieved-believed-conchoraptor.glitch.me/');
 
-const app = express();
-const server = http.createServer(app);
-const wss = new WebSocket.Server({ server });
+const PORT = process.env.PORT || 3000;
+const wss = new WebSocket.Server({ port: PORT });
 
-wss.on("connection", (ws) => {
-  console.log("Utilisateur connecté");
-  ws.on("message", msg => {
-    wss.clients.forEach(client => {
+console.log(`WS server running on port ${PORT}`);
+
+let clients = [];
+
+wss.on('connection', (ws) => {
+  clients.push(ws);
+  console.log('Client connected, total:', clients.length);
+
+  ws.on('message', (message) => {
+    // Relayer le message à tous sauf l’envoyeur
+    clients.forEach(client => {
       if (client !== ws && client.readyState === WebSocket.OPEN) {
-        client.send(msg);
+        client.send(message);
       }
     });
   });
-});
 
-app.get("/", (req, res) => res.send("Serveur WS connecté"));
-server.listen(process.env.PORT || 3000);
+  ws.on('close', () => {
+    clients = clients.filter(c => c !== ws);
+    console.log('Client disconnected, total:', clients.length);
+  });
+});
