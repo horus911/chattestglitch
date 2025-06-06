@@ -3,45 +3,218 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Mini Chatroulette Web</title>
-<link rel="stylesheet" href="style.css" />
+<title>Mini Chatroulette WebRTC + Chat</title>
+<style>
+  /* Ajoute ici le CSS que je t’ai donné dans le message précédent */
+  /* (CSS complet avec .video-container, .chat-messages, etc.) */
+  /* Voici un résumé minimal pour la demo */
+
+  body {
+    margin: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background: linear-gradient(135deg, #667eea, #764ba2);
+    display: flex; flex-direction: column; align-items: center; height: 100vh;
+    padding: 10px; color: #fff;
+  }
+
+  .chat-container {
+    background: white; color: black;
+    max-width: 400px; width: 100%; height: 600px;
+    border-radius: 12px; display: flex; flex-direction: column;
+    box-shadow: 0 8px 25px rgba(0,0,0,0.2);
+    overflow: hidden;
+  }
+  .video-container {
+    height: 40%;
+    background: black;
+    border-bottom: 2px solid #667eea;
+    position: relative;
+  }
+  video {
+    width: 100%; height: 100%; object-fit: cover;
+  }
+  .chat-messages {
+    flex-grow: 1;
+    padding: 10px 15px;
+    overflow-y: auto;
+    background: #f7f7f7;
+    border-top: 1px solid #ddd;
+    color: black;
+  }
+  .message {
+    margin-bottom: 12px;
+    padding: 8px 12px;
+    border-radius: 18px;
+    max-width: 75%;
+    word-wrap: break-word;
+    font-size: 0.95rem;
+    line-height: 1.2;
+  }
+  .message.self {
+    background: #667eea;
+    color: white;
+    align-self: flex-end;
+    border-bottom-right-radius: 4px;
+  }
+  .message.other {
+    background: #e1e1e1;
+    color: #333;
+    align-self: flex-start;
+    border-bottom-left-radius: 4px;
+  }
+  .chat-input {
+    display: flex;
+    border-top: 1px solid #ddd;
+    padding: 10px 15px;
+    background: white;
+  }
+  .chat-input input[type="text"] {
+    flex-grow: 1;
+    padding: 10px 14px;
+    font-size: 1rem;
+    border-radius: 30px;
+    border: 1.5px solid #667eea;
+    outline: none;
+    transition: border-color 0.3s ease;
+  }
+  .chat-input input[type="text"]:focus {
+    border-color: #764ba2;
+  }
+  .chat-input button {
+    margin-left: 12px;
+    background: #667eea;
+    border: none;
+    color: white;
+    padding: 0 18px;
+    border-radius: 30px;
+    cursor: pointer;
+    font-weight: 700;
+    font-size: 1rem;
+    transition: background-color 0.3s ease;
+  }
+  .chat-input button:hover {
+    background: #764ba2;
+  }
+</style>
 </head>
 <body>
 
-<header>
-  <h1>Mini Chatroulette Web</h1>
-  <div id="status" class="status">⚠️ Déconnecté</div>
-</header>
+<h1>Mini Chatroulette</h1>
 
-<section id="setup">
-  <input type="text" id="pseudo" placeholder="Ton pseudo" />
-  <select id="country">
-    <option value="🇨🇦 Canada">🇨🇦 Canada</option>
-    <option value="🇫🇷 France">🇫🇷 France</option>
-    <option value="🇺🇸 USA">🇺🇸 USA</option>
-    <option value="🌍 Autre">🌍 Autre</option>
-  </select>
-  <button id="connectBtn">🔌 Connecter</button>
-  <button id="nextBtn">➡️ Suivant</button>
-</section>
+<div class="chat-container">
+  <div class="video-container">
+    <video id="partnerVideo" autoplay playsinline></video>
+  </div>
+  <div class="chat-messages" id="messages"></div>
+  <form id="chat-form" class="chat-input">
+    <input type="text" id="input-msg" placeholder="Tape ton message..." autocomplete="off" />
+    <button type="submit">Envoyer</button>
+  </form>
+</div>
 
-<section id="chatSection">
-  <div id="chat" class="chat"></div>
-  <input type="text" id="messageInput" placeholder="Écris un message..." autocomplete="off" />
-  <button id="sendBtn">📨 Envoyer</button>
-</section>
+<script>
+(async () => {
+  const ws = new WebSocket("wss://ton-projet.glitch.me");
 
-<section id="mediaControls">
-  <button id="mediaBtn">📷 Activer Caméra/Micro</button>
-  <button id="recordBtn">🎙️ Enregistrer Audio</button>
-  <button id="musicBtn">🎵 Lecture Musique</button>
-</section>
+  const partnerVideo = document.getElementById('partnerVideo');
+  const messages = document.getElementById("messages");
+  const chatForm = document.getElementById("chat-form");
+  const inputMsg = document.getElementById("input-msg");
 
-<section id="videoSection">
-  <video id="localVideo" autoplay muted playsinline></video>
-  <audio id="music" src="https://www.bensound.com/bensound-music/bensound-sunny.mp3" loop></audio>
-</section>
+  let localStream;
+  let peerConnection;
+  const config = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
 
-<script src="script.js"></script>
+  function addMessage(text, sender) {
+    const div = document.createElement("div");
+    div.classList.add("message", sender);
+    div.textContent = text;
+    messages.appendChild(div);
+    messages.scrollTop = messages.scrollHeight;
+  }
+
+  chatForm.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const msg = inputMsg.value.trim();
+    if (!msg) return;
+    addMessage(msg, "self");
+    ws.send(JSON.stringify({ type: 'chat', message: msg }));
+    inputMsg.value = "";
+  });
+
+  async function startLocalStream() {
+    try {
+      localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      // Tu peux aussi montrer ta propre vidéo dans un petit player ici si tu veux
+    } catch (err) {
+      alert("Erreur d'accès caméra/micro : " + err.message);
+    }
+  }
+
+  function createPeerConnection() {
+    peerConnection = new RTCPeerConnection(config);
+    localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
+    peerConnection.ontrack = (event) => {
+      partnerVideo.srcObject = event.streams[0];
+    };
+    peerConnection.onicecandidate = (event) => {
+      if(event.candidate) {
+        ws.send(JSON.stringify({ type: 'candidate', candidate: event.candidate }));
+      }
+    };
+  }
+
+  ws.onopen = async () => {
+    console.log("WS connecté");
+    await startLocalStream();
+    createPeerConnection();
+    ws.send(JSON.stringify({ type: 'ready' }));
+  };
+
+  ws.onmessage = async (event) => {
+    const data = JSON.parse(event.data);
+    switch(data.type) {
+      case 'ready':
+        // Un interlocuteur est prêt, créer l'offre
+        const offer = await peerConnection.createOffer();
+        await peerConnection.setLocalDescription(offer);
+        ws.send(JSON.stringify({ type: 'offer', offer }));
+        break;
+
+      case 'offer':
+        await peerConnection.setRemoteDescription(new RTCSessionDescription(data.offer));
+        const answer = await peerConnection.createAnswer();
+        await peerConnection.setLocalDescription(answer);
+        ws.send(JSON.stringify({ type: 'answer', answer }));
+        break;
+
+      case 'answer':
+        await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
+        break;
+
+      case 'candidate':
+        if(data.candidate) {
+          await peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
+        }
+        break;
+
+      case 'chat':
+        addMessage(data.message, "other");
+        break;
+
+      default:
+        console.log("Message inconnu WS:", data);
+    }
+  };
+
+  ws.onerror = (err) => {
+    console.error("WS erreur", err);
+  };
+
+  ws.onclose = () => {
+    console.log("WS fermé");
+  };
+})();
+</script>
+
 </body>
 </html>
