@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Mini Chatroulette Web</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<header>
+  <h1>Mini Chatroulette Web</h1>
+  <div id="status" class="status">⚠️ Déconnecté</div>
+</header>
+
+<section id="setup">
+  <input type="text" id="pseudo" placeholder="Ton pseudo" />
+  <select id="country">
+    <option value="🇨🇦 Canada">🇨🇦 Canada</option>
+    <option value="🇫🇷 France">🇫🇷 France</option>
+    <option value="🇺🇸 USA">🇺🇸 USA</option>
+    <option value="🌍 Autre">🌍 Autre</option>
+  </select>
+  <button id="connectBtn">🔌 Connecter</button>
+  <button id="nextBtn">➡️ Suivant</button>
+</section>
+
+<section id="chatSection">
+  <div id="chat" class="chat"></div>
+  <input type="text" id="messageInput" placeholder="Écris un message..." autocomplete="off" />
+  <button id="sendBtn">📨 Envoyer</button>
+</section>
+
+<section id="mediaControls">
+  <button id="mediaBtn">📷 Activer Caméra/Micro</button>
+  <button id="recordBtn">🎙️ Enregistrer Audio</button>
+  <button id="musicBtn">🎵 Lecture Musique</button>
+</section>
+
+<section id="videoSection">
+  <video id="localVideo" autoplay muted playsinline></video>
+  <audio id="music" src="https://www.bensound.com/bensound-music/bensound-sunny.mp3" loop></audio>
+</section>
+
+<script src="script.js"></script>
+</body>
+</html>
