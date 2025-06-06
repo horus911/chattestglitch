@@ -1,139 +1,244 @@
-let ws;
-let localStream;
-let recorder, chunks = [];
+// === CONFIGURATION ===
+// Remplace par ton WS Glitch (sans le / à la fin)
+const WS_URL = "wss://night-scarlet-gas.glitch.me/";
 
-function connectWS() {
-  const pseudo = document.getElementById("pseudo").value || "Anonyme";
-  const country = document.getElementById("country").value;
-  ws = new WebSocket("wss://relieved-believed-conchoraptor.glitch.me/");
+const localVideo = document.getElementById("localVideo");
+const remoteVideo = document.getElementById("remoteVideo");
+const chatWindow = document.getElementById("chat-window");
+const chatForm = document.getElementById("chat-form");
+const chatInput = document.getElementById("chat-input");
+const nextBtn = document.getElementById("nextBtn");
+const startRecordBtn = document.getElementById("start-record");
+const stopRecordBtn = document.getElementById("stop-record");
+const recordStatus = document.getElementById("record-status");
+const musicSelect = document.getElementById("music-select");
+const musicPlayer = document.getElementById("music-player");
+
+let localStream;
+let remoteStream;
+let pc;
+let ws;
+let isCaller = false;
+let mediaRecorder;
+let recordedChunks = [];
+
+// --- Setup WebSocket ---
+function setupWebSocket() {
+  ws = new WebSocket(WS_URL);
 
   ws.onopen = () => {
-    document.getElementById("status").textContent = "✅ Connecté !";
-    document.getElementById("status").style.color = "#4CAF50";
-    ws.send(pseudo + " " + country + " a rejoint le chat");
+    logSystem("WebSocket connecté !");
+    if (isCaller) {
+      createOffer();
+    }
   };
 
-  ws.onmessage = (event) => {
-    if (typeof event.data === "string") {
-      if (event.data.startsWith("audio:")) {
-        const audioData = event.data.slice(6);
-        const audio = new Audio(audioData);
-        audio.play();
-        addMessage("🔊 Message audio reçu", "received");
-      } else {
-        addMessage(event.data, "received");
-      }
-    } else {
-      console.warn("⚠️ Message non texte reçu :", event.data);
+  ws.onmessage = async (event) => {
+    let data;
+    try {
+      data = JSON.parse(event.data);
+    } catch {
+      console.warn("Message WS non JSON", event.data);
+      return;
+    }
+
+    switch (data.type) {
+      case "offer":
+        if (!pc) createPeerConnection();
+        await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        sendMessage({ type: "answer", answer });
+        break;
+
+      case "answer":
+        await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
+        break;
+
+      case "ice-candidate":
+        if (data.candidate) {
+          try {
+            await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
+          } catch (err) {
+            console.error("Erreur ICE candidate:", err);
+          }
+        }
+        break;
+
+      case "chat":
+        appendChatMessage("Partenaire", data.message);
+        break;
+
+      case "audio-record":
+        playAudioFromBase64(data.audioData);
+        break;
+
+      case "next":
+        // Relancer une nouvelle connexion
+        closePeerConnection();
+        isCaller = true;
+        createPeerConnection();
+        break;
     }
   };
 
   ws.onclose = () => {
-    document.getElementById("status").textContent = "⚠️ Déconnecté";
-    document.getElementById("status").style.color = "red";
+    logSystem("WebSocket déconnecté");
   };
 
   ws.onerror = (err) => {
-    console.error("WebSocket error:", err);
+    logSystem("Erreur WebSocket : " + err.message);
   };
 }
 
-function addMessage(content, type = "received") {
-  const chatDiv = document.getElementById("chat");
-  const msg = document.createElement("div");
-  msg.textContent = content;
-  msg.style.maxWidth = "80%";
-  msg.style.wordWrap = "break-word";
-  msg.style.backgroundColor = (type === "sent") ? "#DCF8C6" : "#eee";
-  msg.style.float = (type === "sent") ? "right" : "left";
-  msg.style.clear = "both";
-  chatDiv.appendChild(msg);
-  chatDiv.appendChild(document.createElement("br"));
-  chatDiv.scrollTop = chatDiv.scrollHeight;
+function sendMessage(msg) {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify(msg));
+  }
 }
 
-document.getElementById("sendBtn").addEventListener("click", () => {
-  const input = document.getElementById("messageInput");
-  const message = input.value.trim();
-  if (message && ws?.readyState === WebSocket.OPEN) {
-    ws.send(message);
-    addMessage(message, "sent");
-    input.value = "";
-  }
-});
+// --- Log messages dans chat ---
+function appendChatMessage(sender, message) {
+  const p = document.createElement("p");
+  p.innerHTML = `<strong>${sender}:</strong> ${message}`;
+  chatWindow.appendChild(p);
+  chatWindow.scrollTop = chatWindow.scrollHeight;
+}
 
-document.getElementById("messageInput").addEventListener("keydown", (e) => {
-  if (e.key === "Enter") document.getElementById("sendBtn").click();
-});
+function logSystem(message) {
+  appendChatMessage("⚙️ Système", message);
+}
 
-document.getElementById("mediaBtn").addEventListener("click", async () => {
+// --- Setup WebRTC ---
+async function startLocalStream() {
   try {
     localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-    const video = document.getElementById("localVideo");
-    video.srcObject = localStream;
+    localVideo.srcObject = localStream;
   } catch (err) {
     alert("Erreur accès caméra/micro : " + err.message);
   }
-});
+}
 
-document.getElementById("musicBtn").addEventListener("click", () => {
-  const music = document.getElementById("music");
-  if (music.paused) {
-    music.play();
-    document.getElementById("musicBtn").textContent = "⏸️ Pause Musique";
-  } else {
-    music.pause();
-    document.getElementById("musicBtn").textContent = "🎵 Lecture Musique";
+function createPeerConnection() {
+  pc = new RTCPeerConnection({
+    iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+  });
+
+  pc.onicecandidate = (event) => {
+    if (event.candidate) {
+      sendMessage({ type: "ice-candidate", candidate: event.candidate });
+    }
+  };
+
+  pc.ontrack = (event) => {
+    if (!remoteStream) {
+      remoteStream = new MediaStream();
+      remoteVideo.srcObject = remoteStream;
+    }
+    remoteStream.addTrack(event.track);
+  };
+
+  localStream.getTracks().forEach((track) => pc.addTrack(track, localStream));
+}
+
+// --- Création et envoi offre SDP ---
+async function createOffer() {
+  if (!pc) createPeerConnection();
+
+  const offer = await pc.createOffer();
+  await pc.setLocalDescription(offer);
+  sendMessage({ type: "offer", offer });
+}
+
+// --- Fermeture connexion WebRTC ---
+function closePeerConnection() {
+  if (pc) {
+    pc.close();
+    pc = null;
   }
+  if (remoteStream) {
+    remoteStream.getTracks().forEach((t) => t.stop());
+    remoteStream = null;
+    remoteVideo.srcObject = null;
+  }
+}
+
+// --- Gestion chat texte ---
+chatForm.addEventListener("submit", (e) => {
+  e.preventDefault();
+  const msg = chatInput.value.trim();
+  if (msg === "") return;
+  appendChatMessage("Moi", msg);
+  sendMessage({ type: "chat", message: msg });
+  chatInput.value = "";
 });
 
-document.getElementById("recordBtn").addEventListener("click", async () => {
+// --- Bouton "Suivant" ---
+nextBtn.addEventListener("click", () => {
+  logSystem("Recherche d'un nouveau partenaire...");
+  sendMessage({ type: "next" });
+  closePeerConnection();
+  isCaller = true;
+  createPeerConnection();
+});
+
+// --- Enregistrement audio ---
+startRecordBtn.addEventListener("click", () => {
   if (!localStream) {
-    alert("Active d'abord ton micro !");
+    alert("Tu dois activer la caméra/micro d'abord.");
     return;
   }
-
-  if (recorder && recorder.state === "recording") {
-    recorder.stop();
-    document.getElementById("recordBtn").textContent = "🎙️ Enregistrer Audio";
-    return;
-  }
-
-  chunks = [];
-  const audioStream = new MediaStream(localStream.getAudioTracks());
-  recorder = new MediaRecorder(audioStream);
-
-  recorder.ondataavailable = (e) => chunks.push(e.data);
-
-  recorder.onstop = () => {
-    const blob = new Blob(chunks, { type: "audio/webm" });
+  recordedChunks = [];
+  mediaRecorder = new MediaRecorder(localStream, { mimeType: "audio/webm" });
+  mediaRecorder.ondataavailable = (event) => {
+    if (event.data.size > 0) {
+      recordedChunks.push(event.data);
+    }
+  };
+  mediaRecorder.onstop = () => {
+    const blob = new Blob(recordedChunks, { type: "audio/webm" });
     const reader = new FileReader();
     reader.onloadend = () => {
-      const base64data = reader.result;
-      if (ws?.readyState === WebSocket.OPEN) {
-        ws.send("audio:" + base64data);
-        addMessage("🔊 Message audio envoyé", "sent");
-      }
+      const base64data = reader.result.split(",")[1];
+      sendMessage({ type: "audio-record", audioData: base64data });
+      recordStatus.textContent = "Audio envoyé.";
     };
     reader.readAsDataURL(blob);
   };
-
-  recorder.start();
-  document.getElementById("recordBtn").textContent = "⏹️ Stopper l'enregistrement";
-
-  setTimeout(() => {
-    if (recorder && recorder.state === "recording") {
-      recorder.stop();
-      document.getElementById("recordBtn").textContent = "🎙️ Enregistrer Audio";
-    }
-  }, 10000);
+  mediaRecorder.start();
+  startRecordBtn.disabled = true;
+  stopRecordBtn.disabled = false;
+  recordStatus.textContent = "Enregistrement en cours...";
 });
 
-document.getElementById("connectBtn").addEventListener("click", connectWS);
-
-document.getElementById("nextBtn").addEventListener("click", () => {
-  if (ws) ws.close();
-  document.getElementById("chat").innerHTML = "";
-  document.getElementById("status").textContent = "🔄 Reconnexion...";
-  connectWS();
+stopRecordBtn.addEventListener("click", () => {
+  if (mediaRecorder && mediaRecorder.state !== "inactive") {
+    mediaRecorder.stop();
+    startRecordBtn.disabled = false;
+    stopRecordBtn.disabled = true;
+  }
 });
+
+function playAudioFromBase64(base64) {
+  const audio = new Audio("data:audio/webm;base64," + base64);
+  audio.play();
+}
+
+// --- Ambiance musicale ---
+musicSelect.addEventListener("change", () => {
+  const url = musicSelect.value;
+  if (url) {
+    musicPlayer.src = url;
+    musicPlayer.play();
+  } else {
+    musicPlayer.pause();
+    musicPlayer.src = "";
+  }
+});
+
+// --- Initialisation ---
+(async () => {
+  await startLocalStream();
+  isCaller = true;
+  setupWebSocket();
+})();
