@@ -1,6 +1,6 @@
 const express = require("express");
 const http = require("http");
-const WebSocket = require("ws");
+const WebSocket = require("wss://relieved-believed-conchoraptor.glitch.me/");
 
 const app = express();
 const server = http.createServer(app);
