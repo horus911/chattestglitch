@@ -1,6 +1,6 @@
 // === CONFIGURATION ===
 // Remplace par ton WS Glitch (sans le / à la fin)
-const WS_URL = "wss://night-scarlet-gas.glitch.me/";
+const WS_URL = "wss://expensive-hurricane-crow.glitch.me/";
 
 const localVideo = document.getElementById("localVideo");
 const remoteVideo = document.getElementById("remoteVideo");
